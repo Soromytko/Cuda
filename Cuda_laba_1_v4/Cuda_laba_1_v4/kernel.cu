@@ -1,151 +1,116 @@
-﻿
-#include "cuda.h"
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+﻿#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <iostream>
 
-#include <stdio.h>
+using namespace std;
 
-#include "device_info.h"
-#include "cpu_bitmap.h"
+#define SIZE_OF_PIXEL sizeof(int) * 3
 
+#define CHECK(value) {                                          \
+    cudaError_t _m_cudaStat = value;                                        \
+    if (_m_cudaStat != cudaSuccess) {                                       \
+        cout<< "Error:" << cudaGetErrorString(_m_cudaStat) \
+            << " at line " << __LINE__ << " in file " << __FILE__ << "\n"; \
+        exit(1);                                                            \
+    } }
 
-static const int BITMAP_WIDTH = 16;
-static const int BITMAP_HEIGTH = 16;
-
-
-
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-
-__global__ void addKernel(int *c, const int *a, const int *b)
+__device__ int getMaxFromArray(const int* data, int count)
 {
-    int i = threadIdx.x;
-    c[i] = a[i] + b[i];
+    int result = data[0];
+    for (int i = 1; i < count; i++) {
+        if (data[i] > result) {
+            result = data[i];
+        }
+    }
+    return result;
+
 }
 
-__global__ void gradient_cuda(unsigned char* data)
+__global__ void detect_bounds(int* sourceData, int* resultData, int dimX, int dimY)
 {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
-    int offset = x + y * blockDim.x * gridDim.x;
 
+    if (x >= dimX - 1 || y >= dimY - 1) {
+        return;
+    }
+
+    int index = (x + y * blockDim.x * gridDim.x) * SIZE_OF_PIXEL;
+    int rightIndex = (x + 1 + y * blockDim.x * gridDim.x) * SIZE_OF_PIXEL;
+    int bottomIndex = (x + (y + 1) * blockDim.x * gridDim.x) * SIZE_OF_PIXEL;
+
+    int grad_x = getMaxFromArray((sourceData + index), 3);
+    int grad_y = getMaxFromArray((sourceData + index), 3);
+    int grad = grad_x > grad_y ? grad_x : grad_y;
+    if (grad > 40) {
+        for (int i = 0; i < 3; i++) {
+            resultData[index + i] = 255;
+        }
+    }
+    else {
+        for (int i = 0; i < 3; i++) {
+            resultData[index + i] = 0;
+        }
+    }
 }
 
-int main()
+int main(void)
 {
-    print_device_info();
+    Mat image;
+    image = imread("pic.jpg", IMREAD_COLOR);
+    {
+        cout << "Could not open or find the image" << std::endl;
+        return -1;
+    }
 
+    const int width = image.cols;
+    const int height = image.rows;
+    const int dataElementCount = image.rows * image.cols * 3;
+    const int dataSize = dataElementCount * sizeof(int);
 
-    CPUBitmap bitmap(BITMAP_WIDTH, BITMAP_HEIGTH);
-    unsigned char* dev_bitmap;
+    int* dev_sourceData;
+    int* dev_resultData;
 
-    auto malloc_result = cudaMalloc((void**)&dev_bitmap, bitmap.image_size());
-    HANDLE_ERROR(malloc_result);
+    cudaEvent_t startCUDA, stopCUDA;
+    float elapsedTimeCUDA;
 
+    CHECK(cudaMalloc(&dev_sourceData, dataSize));
+    CHECK(cudaMalloc(&dev_resultData, dataSize));
+    CHECK(cudaMemcpy(dev_sourceData, image.data, dataSize));
+
+    cudaEventCreate(&startCUDA);
+    cudaEventCreate(&stopCUDA);
+
+    dim3 grid(width / 16, height / 16);
+    dim3 threads(16, 16);
+
+    cudaEventRecord(startCUDA, 0);
+    detect_bounds<<<grid, threads >>>(dev_sourceData, dev_resultData, width, height);
+    cudaEventRecord(stopCUDA, 0);
+    cudaEventSynchronize(stopCUDA);
+    cudaEventElapsedTime(&elapsedTimeCUDA, startCUDA, stopCUDA);
+
+    cudaEventDestroy(startCUDA);
+    cudaEventDestroy(stopCUDA);
+
+    cout << "CUDA sum time = " << elapsedTimeCUDA << " ms\n";
+    cout << "CUDA memory throughput = " << 3 * N * sizeof(float) / elapsedTimeCUDA / 1024 / 1024 / 1.024 << " Gb/s\n";
+
+    const int* resultData = new int[dataElementCount];
+    CHECK(cudaMemcpy(resultData, dev_resultData, dataSize));
+
+    CHECK(cudaFree(dev_sourceData));
+    CHECK(cudaFree(dev_resultData));
+
+    Mat resultImage;
+    resultImage.data = resultData;
+
+    imwrite("pic2.jpg", resultImage);
+
+    //show image
+    namedWindow("Display window", WINDOW_AUTOSIZE);
+    imshow("Display window", resultImage);
+    waitKey(0);
 
     return 0;
-
-    const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
-
-    // Add vectors in parallel.
-    cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addWithCuda failed!");
-        return 1;
-    }
-
-    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-        c[0], c[1], c[2], c[3], c[4]);
-
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }
-
-    return 0;
-}
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size)
-{
-    int *dev_a = 0;
-    int *dev_b = 0;
-    int *dev_c = 0;
-    cudaError_t cudaStatus;
-
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<<1, size>>>(dev_c, dev_a, dev_b);
-
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
-
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-Error:
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    return cudaStatus;
 }
