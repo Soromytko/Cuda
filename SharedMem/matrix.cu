@@ -72,13 +72,11 @@ void calcSimple(const mat *mat1, const mat *mat2, const result_mat *resultMat)
 {
     std::cout << "GRID " <<  s_gridDim.x << " " << s_gridDim.y << std::endl;
     mat *dev_mat1, *dev_mat2;
-    result_mat *dev_rawResultMat;
-
-    const int rawResultCount = MAT_DIM_Y * s_gridDim.x;
+    result_mat *dev_resultMat;
 
     CHECK(cudaMalloc(&dev_mat1, matSize));
     CHECK(cudaMalloc(&dev_mat2, matSize));
-    CHECK(cudaMalloc(&dev_rawResultMat, rawResultCount * sizeof(result_mat)));
+    CHECK(cudaMalloc(&dev_resultMat, MAT_DIM_Y * sizeof(result_mat)));
     CHECK(cudaMemcpy(dev_mat1, mat1, matSize, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(dev_mat2, mat2, matSize, cudaMemcpyHostToDevice));
 
@@ -89,8 +87,7 @@ void calcSimple(const mat *mat1, const mat *mat2, const result_mat *resultMat)
     cudaEventCreate(&stopCUDA);
 
     cudaEventRecord(startCUDA, 0);
-    calc_zero_count_simple_part1<<<s_gridDim, s_threadDim>>>(dev_mat1, dev_mat2, dev_rawResultMat, MAT_DIM_X, MAT_DIM_Y);
-    calc_zero_count_simple_part2<<<s_gridDim, s_threadDim>>>(dev_mat1, dev_mat2, dev_rawResultMat, MAT_DIM_X, MAT_DIM_Y);
+    calc_zero_count_simple_part<<<ceil((float)MAT_DIM_Y / BLOCK_SIZE), BLOCK_SIZE>>>(dev_mat1, dev_mat2, dev_resultMat, MAT_DIM_X, MAT_DIM_Y);
     cudaEventRecord(stopCUDA, 0);
     cudaEventSynchronize(stopCUDA);
     cudaEventElapsedTime(&elapsedTimeCUDA, startCUDA, stopCUDA);
@@ -98,43 +95,15 @@ void calcSimple(const mat *mat1, const mat *mat2, const result_mat *resultMat)
     cudaEventDestroy(startCUDA);
     cudaEventDestroy(stopCUDA);
 
-    result_mat *rawCudaResultMat = new result_mat[rawResultCount];
-    CHECK(cudaMemcpy(rawCudaResultMat, dev_rawResultMat, rawResultCount * sizeof(result_mat), cudaMemcpyDeviceToHost));
+    result_mat *cudaResultMat = new result_mat[MAT_DIM_Y];
+    CHECK(cudaMemcpy(cudaResultMat, dev_resultMat, MAT_DIM_Y * sizeof(result_mat), cudaMemcpyDeviceToHost));
     CHECK(cudaFree(dev_mat1));
     CHECK(cudaFree(dev_mat2));
-    CHECK(cudaFree(dev_rawResultMat));
+    CHECK(cudaFree(dev_resultMat));
 
-    result_mat *result = new result_mat[MAT_DIM_Y];
-    for (int y = 0; y < MAT_DIM_Y; y++) {
-        result[y] = rawCudaResultMat[MAT_INDEX(0, y, s_gridDim.x)];
-    }
+    assert(isMatEqual(resultMat, cudaResultMat, MAT_DIM_Y));
 
-    // std::cout << "mat1" << std::endl;
-    // printMat(mat1);
-    // std::cout << "\nmat2" << std::endl;
-    // printMat(mat2);
-
-    // std::cout << "CPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << resultMat[i] << " ";
-    // std::cout << "\n\n";
-    // std::cout << "GPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << result[i] << " ";
-    // std::cout << "\n\n";
-    // std::cout << "raw GPU result" << std::endl;
-    // for (int i = 0, j = 0; i < rawResultCount; i++, j++) {
-    //     if (j ==8) {
-    //         j = 0;
-    //    std::cout << std::endl;
-    //     }
-    //     std::cout << (int)rawCudaResultMat[i] << " ";
-    // }
-    // std::cout << "\n\n";
-
-
-    assert(isMatEqual(resultMat, result, MAT_DIM_Y));
-
-    delete rawCudaResultMat;
-    delete result;
+    delete cudaResultMat;
 
     std::cout << "SIMPLE:" << std::endl;
     std::cout << "CUDA sum time = " << elapsedTimeCUDA << " ms\n";
@@ -176,24 +145,8 @@ void calcWithSharedMem(const mat *mat1, const mat *mat2, const result_mat *resul
     CHECK(cudaFree(dev_mat2));
     CHECK(cudaFree(dev_rawResultMat));
 
-    // result_mat *result = new result_mat[MAT_DIM_Y];
-    // for (int y = 0; y < s_gridDim.y; y++) {
-    //     result[y] = 0;
-    //     for (int x = 0; x < s_gridDim.x; x++) {
-    //         result[y] += cudaRawResultMat[x + y * MAT_DIM_X];
-    //     }
-    // }
-
-    // std::cout << "CPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << resultMat[i] << " ";
-    // std::cout << "\n\n";
-    // std::cout << "GPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << cudaResultMat[i] << " ";
-    // std::cout << "\n\n";
-
     assert(isMatEqual(resultMat, cudaResultMat, MAT_DIM_Y));
 
-    // delete result;
     delete cudaResultMat;
 
     std::cout << "SHARED MEM:" << std::endl;
@@ -234,13 +187,6 @@ void calcWithAtomic(const mat *mat1, const mat *mat2, const result_mat *resultMa
     CHECK(cudaFree(dev_mat1));
     CHECK(cudaFree(dev_mat2));
     CHECK(cudaFree(dev_result));
-
-    // std::cout << "CPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << resultMat[i] << " ";
-    // std::cout << "\n\n";
-    // std::cout << "GPU result" << std::endl;
-    // for (int i = 0; i < MAT_DIM_Y; i++) std::cout << cudaResult[i] << " ";
-    // std::cout << "\n\n";
 
     assert(isMatEqual(resultMat, cudaResult, MAT_DIM_Y));
 
