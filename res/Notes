@@ -1,0 +1,7 @@
+https://github.com/rpgolshan/CUDA-image-processing/blob/master/convolution.cu
+
+nvcc  -O2  `pkg-config --cflags opencv4` kernel.cu -o a.out  `pkg-config --libs opencv4` && ./a.out
+
+char
+128 colums
+1000000 rows
