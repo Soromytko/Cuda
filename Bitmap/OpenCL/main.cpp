@@ -1,9 +1,4 @@
-﻿/*
-This sample code is based on:
-https://github.com/Dakkers/OpenCL-examples/blob/master/example00/main.cpp.
-*/
-
-#include <opencv2/core/core.hpp>
+﻿#include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <OpenCL/cl.hpp>
 #include <iostream>
