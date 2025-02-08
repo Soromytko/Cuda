@@ -118,8 +118,18 @@ int main(void)
     cl::NDRange global(ceil((float)width / BLOCK_SIZE), ceil((float)height / BLOCK_SIZE));
     cl::NDRange local(BLOCK_SIZE, BLOCK_SIZE);
     cl::KernelFunctor detect_bounds = cl::KernelFunctor<cl::Buffer&, cl::Buffer&, int, int>(kernel);
-    cl::EnqueueArgs args(queue, global, local);
+    cl::Event event;
+    cl::EnqueueArgs args(queue, global, local, &event);
     detect_bounds(args, buffer_SourceData, buffer_ResultData, width, height);
+    event.wait();
+
+    // Performance.
+    cl_ulong start_time, end_time;
+    event.getProfilingInfo(CL_PROFILING_COMMAND_START, &start_time);
+    event.getProfilingInfo(CL_PROFILING_COMMAND_END, &end_time);
+    // Time in seconds.
+    double kernel_duration = (end_time - start_time) * 1.0e-9;
+    std::cout << "OpenCL performance: " << kernel_duration << std::endl;
 
     // Read result from GPU to here
     uchar* resultData = new uchar[dataElementCount];
