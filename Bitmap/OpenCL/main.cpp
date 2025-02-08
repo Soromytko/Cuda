@@ -6,6 +6,8 @@
 #include <vector>
 #include <algorithm>
 
+#define BLOCK_SIZE 16
+
 using namespace cv;
 using namespace std;
 
@@ -112,8 +114,12 @@ int main(void)
     queue.enqueueWriteBuffer(buffer_SourceData, CL_TRUE, 0, dataSize, image.data);
 
     // Run kernel.
-    cl::KernelFunctor detect_bounds(cl::Kernel(program, "detect_bounds"), queue, cl::NullRange, cl::NDRange(10), cl::NullRange);
-    simple_add(buffer_SourceData, buffer_ResultData, width, height);
+    cl::kernel kernel(program, "detect_bounds"); 
+    cl::NDRange global(ceil((float)width / BLOCK_SIZE), ceil((float)height / BLOCK_SIZE));
+    cl::NDRange local(BLOCK_SIZE, BLOCK_SIZE);
+    cl::KernelFunctor detect_bounds = cl::KernelFunctor<cl::Buffer&, cl::Buffer&, int, int>(kernel);
+    cl::EnqueueArgs args(queue, global, local);
+    detect_bounds(args, buffer_SourceData, buffer_ResultData, width, height);
 
     // Read result from GPU to here
     uchar* resultData = new uchar[dataElementCount];
