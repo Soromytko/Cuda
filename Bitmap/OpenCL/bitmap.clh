@@ -1,0 +1,51 @@
+#define SIZE_OF_PIXEL sizeof(uchar) * 3
+
+int getMax(int v0, int v1, int v2)
+{
+    return max(max(v0, v1), v2);
+}
+
+int getGrad(const uchar* data, const int i0, const int i1)
+{
+    const uchar r0 = data[i0 + 2];
+    const uchar g0 = data[i0 + 1];
+    const uchar b0 = data[i0 + 0];
+
+    const uchar r1 = data[i1 + 2];
+    const uchar g1 = data[i1 + 1];
+    const uchar b1 = data[i1 + 0];
+
+    const int diffR = abs(r0 - r1);
+    const int diffG = abs(g0 - g1);
+    const int diffB = abs(b0 - b1);
+
+    return getMax(diffR, diffG, diffB);
+}
+
+__kernel void detect_bounds(__global uchar* sourceData, __global uchar* resultData, int width, int height)
+{
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
+
+    if (x >= width - 1 || y >= height - 1) {
+        return;
+    }
+
+    const int index = (x + y * width) * SIZE_OF_PIXEL;
+    const int rightIndex = (x + 1 + y * width) * SIZE_OF_PIXEL;
+    const int bottomIndex = (x + (y + 1) * width) * SIZE_OF_PIXEL;
+
+    const int grad_right = getGrad(sourceData, index, rightIndex);
+    const int grad_bottom = getGrad(sourceData, index, bottomIndex);
+    const int grad = grad_right > grad_bottom ? grad_right : grad_bottom;
+    if (grad > MAX_GRAD) {
+        for (int i = 0; i < 3; i++) {
+            resultData[index + i] = 255;
+        }
+    }
+    else {
+        for (int i = 0; i < 3; i++) {
+            resultData[index + i] = 0;
+        }
+    }
+}
