@@ -1,4 +1,5 @@
 #define SIZE_OF_PIXEL sizeof(uchar) * 3
+#define MAX_GRAD 40
 
 int getMax(int v0, int v1, int v2)
 {
